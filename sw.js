@@ -1,7 +1,7 @@
 // 오프라인 실행용 서비스워커: 한 번 열면 인터넷 없이도 앱이 열림
 // ※ 같은 주소(github.io 등)에 다른 앱(골프 스코어 등)이 있어도, 이 앱의 캐시만 정리함
 const PREFIX = 'belajar-yuk-private-';
-const CACHE = PREFIX + 'v13';
+const CACHE = PREFIX + 'v14';
 const FILES = ['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./apple-touch-icon.png','./icon-maskable-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

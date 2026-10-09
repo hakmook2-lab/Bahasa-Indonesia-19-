@@ -550,6 +550,7 @@
       <div class="engine-row" id="engineRow" hidden>
         <span class="engine-label">재생 방식</span>
         <div class="engine-btns">
+          <button type="button" class="engine-btn" data-engine="auto">🔄 자동</button>
           <button type="button" class="engine-btn" data-engine="voice">🗣️ 기기 음성</button>
           <button type="button" class="engine-btn" data-engine="audio">🎧 백그라운드 오디오</button>
         </div>
@@ -1072,6 +1073,18 @@ const IS_MOBILE_DEVICE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userA
 let resumeWordAutoplay = false;
 document.addEventListener('visibilitychange', ()=>{
   if(!IS_MOBILE_DEVICE) return;
+  // 자동 모드: 화면이 꺼지면 기기 음성 → 오디오(현재 단어부터), 다시 켜지면 오디오 → 기기 음성(현재 단어부터)
+  if(PLAY_ENGINE==='auto' && AUDIO_TRACKS && wordAutoplay){
+    if(document.visibilityState==='hidden'){
+      if(!AudioEngine.active){ pauseVoicePlayback(); AudioEngine.start(currentPlayMode(), true); updateAutoplayUI(); }
+    } else if(AudioEngine.active){
+      const p = AudioEngine.position();
+      AudioEngine.toSilence();
+      if(p.cat && DATA[p.cat]){ wordCat = p.cat; resetOrder(); wordIdx = p.idx; buildWordCategoryChips(); }
+      updateAutoplayUI(); renderWordCard();
+    }
+    return;
+  }
   if(AudioEngine && AudioEngine.active) return;   // 백그라운드 오디오는 화면이 꺼져도 계속 재생
   if(document.visibilityState==='hidden'){
     if(wordAutoplay){
@@ -1097,16 +1110,20 @@ const ENGINE_KEY = 'idn-belajar-yuk-engine';
 let PLAY_ENGINE = 'voice';
 if(AUDIO_TRACKS){
   let v = null; try{ v = localStorage.getItem(ENGINE_KEY); }catch(e){}
-  PLAY_ENGINE = (v==='voice' || v==='audio') ? v : (IS_MOBILE_DEVICE ? 'audio' : 'voice');   // 폰 기본값: 백그라운드 오디오
+  PLAY_ENGINE = (v==='voice' || v==='audio' || v==='auto') ? v : (IS_MOBILE_DEVICE ? 'auto' : 'voice');   // 폰 기본값: 자동 전환
 }
-function audioMode(){ return PLAY_ENGINE==='audio' && !!AUDIO_TRACKS; }
+function audioMode(){ return !!AUDIO_TRACKS && (PLAY_ENGINE==='audio' || !!(AudioEngine && AudioEngine.active)); }
+function currentPlayMode(){ return randomMode ? 'random' : (crossCategoryMode ? 'all' : 'single'); }
 var AudioEngine = (function(){
-  const stub = { active:false, start(){}, stop(){}, replay(){} };
+  const stub = { active:false, start(){}, stop(){}, replay(){}, keepAlive(){}, toSilence(){}, position(){ return {cat:wordCat, idx:0}; } };
   if(!AUDIO_TRACKS) return stub;
   const el = document.createElement('audio');
   el.preload = 'auto'; el.setAttribute('playsinline', '');
   document.body.appendChild(el);
   let mode = 'single', queue = [], qi = 0, cueIdx = -1, active = false, revealed = false, pendingSeek = null;
+  // 무음 1.5초 반복 재생: 기기 음성으로 듣는 동안에도 오디오 세션을 살려 두어, 화면이 꺼질 때 실제 오디오로 바로 바꿔치기할 수 있게 함
+  const SILENCE = 'data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAAPAAAExQADRERFRkZHh4iJiYqKi4yMjY2Oj4+Q0NHS0tPT1NXV1tbX2NjaGhscHB0dHh8fICAhIiIjIyRlZWZmZ2hoaWlqa2tsbG2urq+vsLGxsrKztLS1tbb39/j4+fr6+/v8/f3+/v/AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQDjQAAAAAAABMUkgT0xwAAAAAAAAAAAAAAAAD/8zDEAAAAA0gAAAAATEFNRVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEQQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxIMAAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MyxL0AAANIAAAAAFVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMMS+AAADSAAAAABVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zMsS9AAADSAAAAABVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zDEvgAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8zLEvQAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MwxL4AAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+  let silent = false;
   const track = ()=> AUDIO_TRACKS[queue[qi]];
   const catLabel = k => { const c = CATS.find(x=>x.key===k); const l = c ? c.label : k; return (LANG==='ja' && typeof trJa==='function') ? trJa(l) : l; };
   function cueAt(t){ const c = track().cues; let i = 0; while(i+1 < c.length && c[i+1][0] <= t + 0.05) i++; return i; }
@@ -1132,7 +1149,7 @@ var AudioEngine = (function(){
     if(!revealed && el.currentTime >= track().cues[i][1] - 0.05){ revealed = true; revealSplitAnswer(); }
   }
   function load(k, startIdx){
-    const tr = AUDIO_TRACKS[k]; cueIdx = -1;
+    const tr = AUDIO_TRACKS[k]; cueIdx = -1; silent = false; el.loop = false;
     pendingSeek = startIdx ? tr.cues[startIdx][0] : null;
     el.src = tr.file;
   }
@@ -1144,9 +1161,9 @@ var AudioEngine = (function(){
     });
   }
   el.addEventListener('loadedmetadata', ()=>{ if(pendingSeek!=null){ try{ el.currentTime = pendingSeek; }catch(e){} pendingSeek = null; } });
-  el.addEventListener('timeupdate', onTime);
+  el.addEventListener('timeupdate', ()=>{ if(!silent) onTime(); });
   el.addEventListener('ended', ()=>{
-    if(!active) return;
+    if(!active || silent) return;
     qi++;
     if(qi >= queue.length){
       if(mode==='all'){ active = false; finishCrossCategoryAutoplay(); return; }
@@ -1170,29 +1187,52 @@ var AudioEngine = (function(){
     h('previoustrack', ()=>seekCue(-1));
     h('stop', ()=>{ stopWordAutoplay(); renderWordCard(true); });
   }
-  function start(m){
+  function start(m, fromCurrent){
     mode = m; active = true;
     const keys = CATS.map(c=>c.key).filter(k=>AUDIO_TRACKS[k]);
-    if(m==='single'){
-      const real = (wordOrder[wordIdx] != null) ? wordOrder[wordIdx] : 0;
+    const real = (wordOrder[wordIdx] != null) ? wordOrder[wordIdx] : 0;
+    if(m==='single' || fromCurrent){   // 지금 보던 단어부터 이어서
       resetOrder(); wordIdx = real;
-      queue = [wordCat]; qi = 0; load(wordCat, real);
-    } else if(m==='all'){ queue = keys; qi = 0; load(keys[0], 0); }
+      if(m==='single') queue = [wordCat];
+      else if(m==='all'){ const i = Math.max(0, keys.indexOf(wordCat)); queue = keys.slice(i); }
+      else queue = [wordCat].concat(shuffleArr(keys.filter(k=>k!==wordCat)));
+      qi = 0; load(wordCat, real);
+    }
+    else if(m==='all'){ queue = keys; qi = 0; load(keys[0], 0); }
     else { queue = shuffleArr(keys); qi = 0; load(queue[0], 0); }
     playNow();
   }
+  // 기기 음성 모드에서 무음을 틀어 오디오 세션 유지 (버튼 탭 직후 호출되어야 함)
+  function keepAlive(){
+    if(active) return;
+    if(!silent){ silent = true; el.loop = true; el.src = SILENCE; }
+    el.play().catch(()=>{});
+    if('mediaSession' in navigator){ try{ navigator.mediaSession.metadata = new MediaMetadata({ title:'Belajar Yuk!', artist:'연속 재생 중', artwork:[{src:'icon-512.png',sizes:'512x512',type:'image/png'}] }); }catch(e){} }
+  }
+  function position(){ return { cat: queue[qi], idx: Math.max(0, cueIdx) }; }
+  // 실제 오디오 → 무음으로 전환(세션은 유지). 화면이 다시 켜져 기기 음성으로 돌아갈 때 사용
+  function toSilence(){ active = false; queue = []; silent = true; el.loop = true; el.src = SILENCE; el.play().catch(()=>{}); }
   function stop(){
-    active = false; queue = [];
-    try{ el.pause(); }catch(e){}
+    active = false; queue = []; silent = false;
+    try{ el.pause(); el.removeAttribute('src'); el.load(); }catch(e){}
     if('mediaSession' in navigator){ try{ navigator.mediaSession.playbackState = 'none'; }catch(e){} }
   }
   function replay(){ if(cueIdx >= 0) el.currentTime = track().cues[cueIdx][0]; }
-  return { get active(){ return active; }, start, stop, replay, el };
+  return { get active(){ return active; }, start, stop, replay, keepAlive, position, toSilence, el };
 })();
 // 연속 재생 시작: 선택한 재생 방식에 따라 기기 음성 또는 오디오 파일로
 function startWordPlayback(m){
-  if(audioMode()){ AudioEngine.start(m); updateAutoplayUI(); }
-  else renderWordCard();
+  if(!AUDIO_TRACKS){ renderWordCard(); return; }
+  const autoMobile = PLAY_ENGINE==='auto' && IS_MOBILE_DEVICE;
+  if(PLAY_ENGINE==='audio' || (autoMobile && document.visibilityState==='hidden')){ AudioEngine.start(m); updateAutoplayUI(); }
+  else { if(autoMobile) AudioEngine.keepAlive(); renderWordCard(); }
+}
+// 기기 음성 재생의 타이머·발화를 멈춤(상태 플래그는 유지)
+function pauseVoicePlayback(){
+  clearTimeout(autoplayTimer);
+  if(revealSafetyTimer){ clearTimeout(revealSafetyTimer); revealSafetyTimer = null; }
+  if(pendingEnglishTimer){ clearTimeout(pendingEnglishTimer); pendingEnglishTimer = null; }
+  try{ window.speechSynthesis.cancel(); }catch(e){}
 }
 
 function buildWordCategoryChips(){
@@ -1246,6 +1286,9 @@ function updateAutoplayUI(){
       : (allActive
         ? '🔊 전체 카테고리 순차 재생 중 · 인사말부터 '+CATS[CATS.length-1].label+'까지 자동으로 넘어가며 읽어줘요'
         : '🔊 연속 재생 중 · 손을 안 대도 계속 넘어가며 읽어줘요');
+  }
+  if(wordAutoplay && PLAY_ENGINE==='auto' && IS_MOBILE_DEVICE && AUDIO_TRACKS && !(AudioEngine && AudioEngine.active)){
+    status.textContent += ' · 화면을 끄거나 다른 앱으로 가면 오디오로 이어서 재생돼요';
   }
   if(wordAutoplay && audioMode()){
     status.textContent = randActive
@@ -2010,7 +2053,10 @@ document.getElementById('btnImport').addEventListener('click', async ()=>{
   const hint = document.getElementById('engineHint');
   const paint = ()=>{
     row.querySelectorAll('.engine-btn').forEach(b=>{ const on = b.dataset.engine===PLAY_ENGINE; b.classList.toggle('active', on); b.setAttribute('aria-pressed', on?'true':'false'); });
-    hint.textContent = PLAY_ENGINE==='audio'
+    hint.textContent = PLAY_ENGINE==='auto'
+      ? (IS_MOBILE_DEVICE ? '화면을 볼 땐 기기 음성, 화면을 끄거나 다른 앱으로 가면 오디오로 자동 전환 · 현재 단어부터 이어서 재생'
+                          : 'PC에서는 기기 음성으로 재생돼요 (다른 창을 봐도 계속 재생)')
+      : PLAY_ENGINE==='audio'
       ? '화면을 꺼도, 다른 앱을 써도 계속 재생 · 잠금화면에서 다음/일시정지 가능 · 신경망 음성(영어 음량 조절은 적용 안 됨)'
       : '자연스러운 발음 · 폰에서는 화면이 켜져 있을 때만 재생돼요';
   };

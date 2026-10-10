@@ -830,11 +830,11 @@ function sanitizeForSpeech(text, lang){
   return text.replace(/\s*\/\s*/g, joiner).replace(/\s+/g,' ').trim();
 }
 function pickRate(text){
-  // 기기 음성 속도: 단어가 길수록 천천히 (v17: v16 대비 20% 빠르게)
+  // 기기 음성 속도: 단어가 길수록 천천히 (v18: v16 수치로 복원)
   const wc = text.trim().split(/\s+/).length;
-  if(wc > 6) return 0.89;
-  if(wc > 3) return 1.08;
-  return 1.18;
+  if(wc > 6) return 0.74;
+  if(wc > 3) return 0.9;
+  return 0.98;
 }
 function isNumericLike(text){
   return /^[\d.,\s]+$/.test(text);
@@ -939,7 +939,7 @@ function speakID(text, rateOverride){
 // 반환값: 이 카드(인니어+영어)를 다 읽는 데 걸리는 예상 총 시간(ms)
 let pendingEnglishTimer = null; // 직전 카드의 "영어 낭독 예약"이 남아있으면 새 카드 시작 시 반드시 취소해야 함
 function speakWordPairTimed(idnText, engText, onEnglishStart){
-  const NEXT_WORD_GAP_MS = 3200; // 다음 카드로 넘어가기 전 간격(직전 800ms 대비 4배 = "3배 더 길게")
+  const NEXT_WORD_GAP_MS = 1500; // 다음 카드로 넘어가기 전 간격 (v18: 3200ms → 1500ms, 오디오 파일의 1.0초 간격과 비슷하게)
   // 버그 수정: 이전 카드에서 예약해 둔 "영어 낭독" setTimeout이 아직 안 끝났는데 새 카드가 시작되면,
   // 그 타이머가 나중에 그대로 발화되어 "지금 보이는 인니어 카드"에 "이전 카드의 영어"가 섞여 들리는
   // 문제가 있었음(인니어/영어 불일치의 원인). 새로 시작할 때 무조건 먼저 취소함.

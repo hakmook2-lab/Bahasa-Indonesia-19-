@@ -830,11 +830,11 @@ function sanitizeForSpeech(text, lang){
   return text.replace(/\s*\/\s*/g, joiner).replace(/\s+/g,' ').trim();
 }
 function pickRate(text){
-  // 기기 음성 속도: 단어가 길수록 천천히 (v16: 전체적으로 약 12% 빠르게 조정)
+  // 기기 음성 속도: 단어가 길수록 천천히 (v17: v16 대비 20% 빠르게)
   const wc = text.trim().split(/\s+/).length;
-  if(wc > 6) return 0.74;
-  if(wc > 3) return 0.9;
-  return 0.98;
+  if(wc > 6) return 0.89;
+  if(wc > 3) return 1.08;
+  return 1.18;
 }
 function isNumericLike(text){
   return /^[\d.,\s]+$/.test(text);

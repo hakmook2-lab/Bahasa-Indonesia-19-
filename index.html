@@ -391,6 +391,13 @@
   .install-card .btn{ width:100%; margin-top:6px; }
   .ios-share{ display:inline-block; width:18px; height:18px; vertical-align:-3px; }
 
+  .sel-card{ max-height:88vh; overflow:auto; }
+  .sel-grid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin:10px 0; }
+  .sel-item{ display:flex; align-items:center; gap:8px; padding:9px 10px; border:1.5px solid var(--line); border-radius:12px; background:var(--field); font-size:13.5px; cursor:pointer; }
+  .sel-item.on{ border-color:var(--teal); background:var(--teal-pale); font-weight:700; }
+  .sel-item input{ accent-color:var(--teal); width:18px; height:18px; margin:0; }
+  .sel-count{ font-size:12.5px; color:var(--teal-dark); margin:4px 0 10px; min-height:18px; }
+  #selSheet .btn{ margin-top:8px; } #selSheet .btn:disabled{ opacity:.45; cursor:not-allowed; }
   .engine-row{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:4px 0 12px; }
   .engine-label{ font-size:12.5px; font-weight:700; color:var(--ink-soft); }
   .engine-btns{ display:inline-flex; padding:3px; gap:3px; border-radius:999px; background:var(--ghost); }
@@ -559,6 +566,7 @@
       <button class="btn btn-mango btn-wide" id="btnAutoplay">🔁 이 카테고리만 연속 재생</button>
       <button class="btn btn-teal btn-wide" id="btnAutoplayAll">🌏 전체 카테고리 순차 재생 (인사말→마사지샵)</button>
       <button class="btn btn-purple btn-wide" id="btnAutoplayRandom">🎲 임의 연속 재생 (정지할 때까지 무한)</button>
+      <button class="btn btn-ghost btn-wide" id="btnAutoplaySel">☑️ 골라서 반복 재생</button>
       <div class="wake-badge" id="wakeBadge"></div>
       <div class="autoplay-status" id="autoplayStatus">🔊 연속 재생 중 · 손을 안 대도 계속 넘어가며 읽어줘요</div>
     </div>
@@ -634,6 +642,17 @@
       <p>단어 뜻·예문·화면을 어떤 언어로 볼지 고르세요. 진도는 그대로 유지돼요.<br>単語の意味・例文・画面の言語を選んでください。進捗はそのまま残ります。</p>
       <button class="lang-opt" data-lang="ko"><span class="lo-flag">🇰🇷</span><span><b>한국어로 배우기</b><small>뜻과 설명을 한국어로</small></span></button>
       <button class="lang-opt" data-lang="ja"><span class="lo-flag">🇯🇵</span><span><b>日本語で学ぶ</b><small>意味と説明を日本語で</small></span></button>
+    </div>
+  </div>
+  <div class="install-sheet" id="selSheet" hidden>
+    <div class="install-card sel-card" role="dialog" aria-modal="true" aria-labelledby="selTitle">
+      <button class="ib-close sheet-close" id="selSheetClose" aria-label="닫기">✕</button>
+      <h3 id="selTitle">☑️ 반복해서 들을 카테고리 고르기</h3>
+      <p>2개 이상 골라서 그 카테고리만 반복해서 들을 수 있어요. 선택은 저장돼요.</p>
+      <div class="sel-grid" id="selGrid"></div>
+      <div class="sel-count" id="selCount"></div>
+      <button class="btn btn-mango" id="btnSelSeq">▶ 순서대로 반복</button>
+      <button class="btn btn-purple" id="btnSelRand">🎲 섞어서 반복</button>
     </div>
   </div>
   <div class="install-sheet" id="installSheet" hidden>
@@ -1000,6 +1019,12 @@ let knownMap = {}; // key: cat|idx -> true/false
 let wordAutoplay = false;
 let crossCategoryMode = false; // true: 인사말→장소까지 카테고리를 넘나들며 순차 재생
 let randomMode = false; // true: 카테고리·단어를 무작위로 뽑아 정지할 때까지 무한 재생
+let selectedMode = false;   // true: 골라 둔 카테고리들만 순서대로 반복
+let selectedRandom = false; // true: 골라 둔 카테고리들 안에서만 무작위
+let selectedCats = [];      // 골라 둔 카테고리 key 목록 (저장됨)
+try{ selectedCats = JSON.parse(localStorage.getItem(STORE_PREFIX+'selCats') || '[]').filter(k=>DATA[k]); }catch(e){}
+function selectedCatList(){ return CATS.filter(c=>selectedCats.includes(c.key)); }
+function selectedLabels(){ return selectedCatList().map(c=>c.label).join(' · '); }
 let autoplayTimer = null;
 
 function wordKey(cat, i){ return cat+'|'+i; }
@@ -1114,7 +1139,7 @@ if(AUDIO_TRACKS){
   PLAY_ENGINE = (v==='voice' || v==='audio' || v==='auto') ? v : (IS_MOBILE_DEVICE ? 'auto' : 'voice');   // 폰 기본값: 자동 전환
 }
 function audioMode(){ return !!AUDIO_TRACKS && (PLAY_ENGINE==='audio' || !!(AudioEngine && AudioEngine.active)); }
-function currentPlayMode(){ return randomMode ? 'random' : (crossCategoryMode ? 'all' : 'single'); }
+function currentPlayMode(){ return randomMode ? 'random' : (crossCategoryMode ? 'all' : (selectedMode ? 'selected' : 'single')); }
 var AudioEngine = (function(){
   const stub = { active:false, start(){}, stop(){}, replay(){}, keepAlive(){}, toSilence(){}, position(){ return {cat:wordCat, idx:0}; } };
   if(!AUDIO_TRACKS) return stub;
@@ -1169,7 +1194,7 @@ var AudioEngine = (function(){
     if(qi >= queue.length){
       if(mode==='all'){ active = false; finishCrossCategoryAutoplay(); return; }
       if(mode==='random') queue = shuffleArr(queue);
-      qi = 0;                                   // 이 카테고리만: 처음부터 반복 / 임의: 새 순서로 계속
+      qi = 0;                                   // 이 카테고리만·골라서: 처음부터 반복 / 임의: 새 순서로 계속
     }
     load(queue[qi], 0); playNow();
   });
@@ -1190,8 +1215,16 @@ var AudioEngine = (function(){
   }
   function start(m, fromCurrent){
     mode = m; active = true;
-    const keys = CATS.map(c=>c.key).filter(k=>AUDIO_TRACKS[k]);
+    const allKeys = CATS.map(c=>c.key).filter(k=>AUDIO_TRACKS[k]);
+    const selKeys = selectedCats.filter(k=>AUDIO_TRACKS[k]);
+    const keys = ((m==='selected' || (m==='random' && selectedRandom)) && selKeys.length) ? selKeys : allKeys;
     const real = (wordOrder[wordIdx] != null) ? wordOrder[wordIdx] : 0;
+    if(m==='selected'){   // 골라 둔 카테고리들을 순서대로 반복
+      resetOrder(); wordIdx = fromCurrent ? real : 0;
+      queue = keys; qi = Math.max(0, keys.indexOf(wordCat)); if(!fromCurrent && qi<0) qi = 0;
+      if(!keys.includes(wordCat)){ qi = 0; wordIdx = 0; }
+      wordCat = queue[qi]; load(wordCat, wordIdx); playNow(); return;
+    }
     if(m==='single' || fromCurrent){   // 지금 보던 단어부터 이어서
       resetOrder(); wordIdx = real;
       if(m==='single') queue = [wordCat];
@@ -1257,8 +1290,8 @@ async function loadKnownMap(){
 }
 // 카테고리 하나와 그 안의 단어 하나를 완전히 무작위로 뽑아 현재 카드로 지정
 function pickRandomWord(){
-  const catIdx = Math.floor(Math.random() * CATS.length);
-  wordCat = CATS[catIdx].key;
+  const pool = (selectedRandom && selectedCats.length) ? selectedCatList() : CATS;
+  wordCat = pool[Math.floor(Math.random() * pool.length)].key;
   resetOrder();
   wordIdx = Math.floor(Math.random() * DATA[wordCat].length);
   buildWordCategoryChips();
@@ -1269,9 +1302,16 @@ function updateAutoplayUI(){
   const btnRand = document.getElementById('btnAutoplayRandom');
   const status = document.getElementById('autoplayStatus');
   if(!btn || !btnAll || !btnRand) return;
-  const singleActive = wordAutoplay && !crossCategoryMode && !randomMode;
+  const singleActive = wordAutoplay && !crossCategoryMode && !randomMode && !selectedMode;
   const allActive = wordAutoplay && crossCategoryMode && !randomMode;
   const randActive = wordAutoplay && randomMode;
+  const selActive = wordAutoplay && (selectedMode || (randomMode && selectedRandom));
+  const btnSel = document.getElementById('btnAutoplaySel');
+  if(btnSel){
+    btnSel.textContent = selActive ? '⏸ 골라서 반복 중지' : ('☑️ 골라서 반복 재생' + (selectedCats.length ? ' ('+selectedCats.length+'개 선택됨)' : ''));
+    btnSel.classList.toggle('btn-coral', selActive);
+    btnSel.classList.toggle('btn-ghost', !selActive);
+  }
   btn.textContent = singleActive ? '⏸ 연속 재생 중지' : '🔁 이 카테고리만 연속 재생';
   btn.classList.toggle('btn-coral', singleActive);
   btn.classList.toggle('btn-mango', !singleActive);
@@ -1287,6 +1327,7 @@ function updateAutoplayUI(){
       : (allActive
         ? '🔊 전체 카테고리 순차 재생 중 · 인사말부터 '+CATS[CATS.length-1].label+'까지 자동으로 넘어가며 읽어줘요'
         : '🔊 연속 재생 중 · 손을 안 대도 계속 넘어가며 읽어줘요');
+    if(selActive) status.textContent = (selectedRandom && randomMode ? '🎲 골라 둔 카테고리 안에서 무작위 반복 중: ' : '🔊 골라 둔 카테고리만 순서대로 반복 중: ') + selectedLabels();
   }
   if(wordAutoplay && PLAY_ENGINE==='auto' && IS_MOBILE_DEVICE && AUDIO_TRACKS && !(AudioEngine && AudioEngine.active)){
     status.textContent += ' · 화면을 끄거나 다른 앱으로 가면 오디오로 이어서 재생돼요';
@@ -1295,6 +1336,7 @@ function updateAutoplayUI(){
     status.textContent = randActive
       ? '🎧 임의 재생 중 · 카테고리를 무작위 순서로 이어서 들려줘요 (화면을 꺼도 계속)'
       : '🎧 백그라운드 재생 중 · 화면을 꺼도, 다른 앱을 써도 계속 들려요';
+    if(selActive) status.textContent = '🎧 골라 둔 카테고리 반복 중 (화면을 꺼도 계속): ' + selectedLabels();
   }
   status.classList.toggle('show', wordAutoplay);
   syncKeepAwake();
@@ -1305,6 +1347,8 @@ function stopWordAutoplay(){
   resumeWordAutoplay = false;
   crossCategoryMode = false;
   randomMode = false;
+  selectedMode = false;
+  selectedRandom = false;
   clearTimeout(autoplayTimer);
   if(revealSafetyTimer){ clearTimeout(revealSafetyTimer); revealSafetyTimer = null; }
   if(pendingEnglishTimer){ clearTimeout(pendingEnglishTimer); pendingEnglishTimer = null; }
@@ -1321,6 +1365,13 @@ function advanceWordOrCategory(){
   }
   const total = DATA[wordCat].length;
   const atLastItem = (wordIdx === total - 1);
+  if(selectedMode && atLastItem){
+    const list = selectedCats.filter(k=>DATA[k]);
+    const i = list.indexOf(wordCat);
+    wordCat = list[(i + 1) % list.length] || wordCat;
+    wordIdx = 0; resetOrder(); buildWordCategoryChips(); renderWordCard();
+    return;
+  }
   if(crossCategoryMode && atLastItem){
     const catIdx = CATS.findIndex(c => c.key === wordCat);
     if(catIdx < CATS.length - 1){
@@ -2043,6 +2094,46 @@ document.getElementById('btnImport').addEventListener('click', async ()=>{
     const c = sanitizeForSpeech('Selamat pagi, apa kabar?', 'id'); const v = pickIndonesianVoice();
     speakRaw(applyFallbackPhonetics(c, !!v), 'id', pickRate(c));
     speakRaw('Good morning, how are you?', 'en', 0.95);
+  });
+})();
+
+/* ================= 골라서 반복 재생 ================= */
+(function(){
+  const btn = document.getElementById('btnAutoplaySel'), sheet = document.getElementById('selSheet');
+  const grid = document.getElementById('selGrid'), count = document.getElementById('selCount');
+  if(!btn) return;
+  function paint(){
+    grid.innerHTML = CATS.map(c=>'<label class="sel-item'+(selectedCats.includes(c.key)?' on':'')+'"><input type="checkbox" value="'+c.key+'"'+(selectedCats.includes(c.key)?' checked':'')+'><span>'+c.icon+' '+c.label+'</span></label>').join('');
+    grid.querySelectorAll('input').forEach(i=>i.addEventListener('change', ()=>{
+      selectedCats = [...grid.querySelectorAll('input:checked')].map(x=>x.value);
+      try{ localStorage.setItem(STORE_PREFIX+'selCats', JSON.stringify(selectedCats)); }catch(e){}
+      i.closest('.sel-item').classList.toggle('on', i.checked); refresh();
+    }));
+    refresh();
+  }
+  function refresh(){
+    const n = selectedCats.length;
+    count.textContent = n ? n+'개 선택: '+selectedLabels() : '아직 고른 카테고리가 없어요';
+    document.getElementById('btnSelSeq').disabled = !n; document.getElementById('btnSelRand').disabled = !n;
+    updateAutoplayUI();
+  }
+  const close = ()=>{ sheet.hidden = true; };
+  btn.addEventListener('click', ()=>{
+    if(wordAutoplay && (selectedMode || (randomMode && selectedRandom))){ stopWordAutoplay(); renderWordCard(true); return; }
+    paint(); sheet.hidden = false;
+  });
+  document.getElementById('selSheetClose').addEventListener('click', close);
+  sheet.addEventListener('click', e=>{ if(e.target===sheet) close(); });
+  document.getElementById('btnSelSeq').addEventListener('click', ()=>{
+    if(!selectedCats.length) return; close(); stopWordAutoplay();
+    selectedMode = true; wordAutoplay = true;
+    wordCat = selectedCats[0]; resetOrder(); wordIdx = 0; buildWordCategoryChips();
+    updateAutoplayUI(); startWordPlayback('selected');
+  });
+  document.getElementById('btnSelRand').addEventListener('click', ()=>{
+    if(!selectedCats.length) return; close(); stopWordAutoplay();
+    randomMode = true; selectedRandom = true; wordAutoplay = true;
+    pickRandomWord(); updateAutoplayUI(); startWordPlayback('random');
   });
 })();
 
